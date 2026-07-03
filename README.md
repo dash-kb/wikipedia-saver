@@ -25,8 +25,6 @@ Then load the unpacked browser extension:
 
 Wikipedia article pages will show a "Save to local wiki" button in the lower-right corner.
 
-To set the refresh interval, open the extension details in `chrome://extensions` or `edge://extensions` and choose "Extension options".
-
 The macOS installer stages the background runtime and default LaunchAgent archive under:
 
 ```text
@@ -60,6 +58,24 @@ Run the local browser-extension server manually:
 
 ```sh
 python3 -m wiki_saver.cli serve
+```
+
+## Refresh Interval
+
+The updater checks once per day at 9:00 AM, then refreshes saved pages only if your configured interval has elapsed. The default interval is 7 days.
+
+Set the interval from Chrome or Edge:
+
+1. Open `chrome://extensions` or `edge://extensions`.
+2. Find "Local Wikipedia Saver".
+3. Click "Details".
+4. Click "Extension options".
+5. Set "Refresh saved pages every" to the number of days you want.
+
+You can also set it from the command line:
+
+```sh
+python3 -m wiki_saver.cli settings --refresh-interval-days 14
 ```
 
 ## Archive Layout
