@@ -3,7 +3,7 @@
 A local Wikipedia archiver with:
 
 - a browser button on Wikipedia article pages
-- a local Python server that saves pages into `../local-wiki`
+- a local Python server that saves pages into `~/Library/Application Support/WikipediaSaver/local-wiki`
 - git history for every saved page
 - a macOS updater that checks daily and refreshes when your configured interval has elapsed
 
@@ -64,7 +64,7 @@ python3 -m wiki_saver.cli serve
 
 ## Archive Layout
 
-Manual CLI commands default to `../local-wiki`. The installed macOS background service defaults to `~/Library/Application Support/WikipediaSaver/local-wiki`.
+The default archive is `~/Library/Application Support/WikipediaSaver/local-wiki` for the CLI, local server, and installed macOS background service.
 
 Saved pages are written like this:
 
@@ -83,9 +83,10 @@ local-wiki/
 
 English Wikipedia pages are stored directly under `pages/`. Other Wikipedia sites, including non-English sites, are grouped by hostname under `pages/<site>/`.
 
-Useful git commands inside `../local-wiki`:
+Useful git commands inside the archive:
 
 ```sh
+cd "$HOME/Library/Application Support/WikipediaSaver/local-wiki"
 git log --stat
 git diff HEAD~1 -- pages/Wikipedia/article.wikitext
 git checkout HEAD~1 -- pages/Wikipedia/article.wikitext

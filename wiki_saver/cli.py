@@ -13,7 +13,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--repo",
         default=str(default_repo_path()),
-        help="Path to the saved-page git repo. Defaults to ../local-wiki.",
+        help="Path to the saved-page git repo. Defaults to ~/Library/Application Support/WikipediaSaver/local-wiki.",
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)

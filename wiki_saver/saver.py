@@ -36,7 +36,7 @@ class WikipediaPageRef:
 
 
 def default_repo_path() -> Path:
-    return Path(__file__).resolve().parents[2] / "local-wiki"
+    return Path.home() / "Library" / "Application Support" / "WikipediaSaver" / "local-wiki"
 
 
 def parse_wikipedia_url(url: str) -> WikipediaPageRef:

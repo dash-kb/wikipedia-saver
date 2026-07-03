@@ -5,10 +5,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from wiki_saver.saver import GitBackedWikiArchive, WikiSaverError, page_slug, parse_wikipedia_url
+from wiki_saver.saver import GitBackedWikiArchive, WikiSaverError, default_repo_path, page_slug, parse_wikipedia_url
 
 
 class SaverTests(unittest.TestCase):
+    def test_default_repo_path_uses_application_support(self):
+        with patch.object(Path, "home", return_value=Path("/Users/example")):
+            self.assertEqual(
+                default_repo_path(),
+                Path("/Users/example/Library/Application Support/WikipediaSaver/local-wiki"),
+            )
+
     def test_parse_wikipedia_article_url(self):
         ref = parse_wikipedia_url("https://en.wikipedia.org/wiki/Wikipedia:About#History")
         self.assertEqual(ref.host, "en.wikipedia.org")
