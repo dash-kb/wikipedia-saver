@@ -14,6 +14,10 @@
 - The local backend listens on `127.0.0.1:8765`.
 - The backend code is in `wiki_saver/` and uses only the Python standard library plus the system `git` command.
 - macOS automation is handled by LaunchAgents generated from `scripts/install-macos-launchagents.sh`.
+- The LaunchAgent installer stages a runtime copy under `~/Library/Application Support/WikipediaSaver/runtime`.
+- The installed LaunchAgent archive defaults to `~/Library/Application Support/WikipediaSaver/local-wiki` to avoid macOS Desktop/Documents privacy restrictions.
+- Refresh preferences are stored in `.wiki-saver-settings.json` inside the archive repo and ignored by git.
+- The updater LaunchAgent checks daily; `wiki_saver.saver.GitBackedWikiArchive.update_all()` enforces `refresh_interval_days`.
 
 ## Common Commands
 
@@ -26,6 +30,8 @@ python3 -m json.tool extension/manifest.json >/dev/null
 python3 -m wiki_saver.cli init
 python3 -m wiki_saver.cli save "https://en.wikipedia.org/wiki/Wikipedia"
 python3 -m wiki_saver.cli update-all
+python3 -m wiki_saver.cli update-all --force
+python3 -m wiki_saver.cli settings --refresh-interval-days 7
 python3 -m wiki_saver.cli serve
 ```
 
@@ -43,6 +49,7 @@ git -C ../local-wiki log --oneline --stat
 - Do not delete or revert saved pages in `../local-wiki` without explicit user direction.
 - If changing the extension/backend request contract, update both `extension/background.js` and `wiki_saver/server.py`.
 - If changing archive file layout, update `README.md`, tests, and any index-writing logic in `wiki_saver/saver.py`.
+- Archive layout intentionally stores English pages at `pages/<PageSlug>/` and non-English/non-`en.wikipedia.org` pages at `pages/<site>/<PageSlug>/`.
 - Browser extension changes should remain Manifest V3 compatible.
 
 ## Sandbox Notes
@@ -53,4 +60,10 @@ git -C ../local-wiki log --oneline --stat
 ```sh
 cd /Users/dpkb/Desktop/projects/wikipedia-saver
 ./scripts/install-macos-launchagents.sh
+```
+
+- If a user wants the LaunchAgent archive somewhere else, they can run:
+
+```sh
+WIKIPEDIA_SAVER_REPO="/path/to/local-wiki" ./scripts/install-macos-launchagents.sh
 ```

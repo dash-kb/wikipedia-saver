@@ -5,7 +5,7 @@ A local Wikipedia archiver with:
 - a browser button on Wikipedia article pages
 - a local Python server that saves pages into `../local-wiki`
 - git history for every saved page
-- a weekly macOS updater that refreshes saved pages and commits changes
+- a macOS updater that checks daily and refreshes when your configured interval has elapsed
 
 ## Install
 
@@ -25,6 +25,20 @@ Then load the unpacked browser extension:
 
 Wikipedia article pages will show a "Save to local wiki" button in the lower-right corner.
 
+To set the refresh interval, open the extension details in `chrome://extensions` or `edge://extensions` and choose "Extension options".
+
+The macOS installer stages the background runtime and default LaunchAgent archive under:
+
+```text
+~/Library/Application Support/WikipediaSaver/
+```
+
+This avoids macOS privacy restrictions that can prevent LaunchAgents from running code or writing data under Desktop/Documents folders. To force a different archive location during install:
+
+```sh
+WIKIPEDIA_SAVER_REPO="/path/to/local-wiki" ./scripts/install-macos-launchagents.sh
+```
+
 ## Usage
 
 Manual save from the command line:
@@ -38,6 +52,8 @@ Refresh every saved page:
 
 ```sh
 python3 -m wiki_saver.cli update-all
+python3 -m wiki_saver.cli update-all --force
+python3 -m wiki_saver.cli settings --refresh-interval-days 14
 ```
 
 Run the local browser-extension server manually:
@@ -48,25 +64,31 @@ python3 -m wiki_saver.cli serve
 
 ## Archive Layout
 
-Saved pages are written to `../local-wiki`:
+Manual CLI commands default to `../local-wiki`. The installed macOS background service defaults to `~/Library/Application Support/WikipediaSaver/local-wiki`.
+
+Saved pages are written like this:
 
 ```text
 local-wiki/
   index.json
   pages/
-    en.wikipedia.org/
-      Wikipedia/
+    Wikipedia/
+      article.wikitext
+      article.html
+      metadata.json
+    fr.wikipedia.org/
+      Paris/
         article.wikitext
-        article.html
-        metadata.json
 ```
+
+English Wikipedia pages are stored directly under `pages/`. Other Wikipedia sites, including non-English sites, are grouped by hostname under `pages/<site>/`.
 
 Useful git commands inside `../local-wiki`:
 
 ```sh
 git log --stat
-git diff HEAD~1 -- pages/en.wikipedia.org/Wikipedia/article.wikitext
-git checkout HEAD~1 -- pages/en.wikipedia.org/Wikipedia/article.wikitext
+git diff HEAD~1 -- pages/Wikipedia/article.wikitext
+git checkout HEAD~1 -- pages/Wikipedia/article.wikitext
 ```
 
 ## macOS Services
@@ -76,4 +98,4 @@ The installer creates:
 - `~/Library/LaunchAgents/com.local.wikipedia-saver.server.plist`
 - `~/Library/LaunchAgents/com.local.wikipedia-saver.weekly.plist`
 
-The server starts at login and stays running. The weekly updater runs Monday at 9:00 AM.
+The server starts at login and stays running. The updater checks daily at 9:00 AM and refreshes only when the configured interval has elapsed.

@@ -24,6 +24,12 @@ class SaverRequestHandler(BaseHTTPRequestHandler):
         if self.path == "/save":
             self._handle_save()
             return
+        if self.path == "/status":
+            self._handle_status()
+            return
+        if self.path == "/settings":
+            self._handle_settings()
+            return
         if self.path == "/update-all":
             self._handle_update_all()
             return
@@ -44,9 +50,31 @@ class SaverRequestHandler(BaseHTTPRequestHandler):
         except WikiSaverError as exc:
             self._send_json({"ok": False, "error": str(exc)}, status=400)
 
+    def _handle_status(self) -> None:
+        payload = self._read_json()
+        url = str(payload.get("url") or "")
+        if not url:
+            self._send_json({"ok": False, "error": "Missing url"}, status=400)
+            return
+        try:
+            self._send_json(self.archive.saved_status(url))
+        except WikiSaverError as exc:
+            self._send_json({"ok": False, "error": str(exc)}, status=400)
+
     def _handle_update_all(self) -> None:
         try:
-            self._send_json(self.archive.update_all())
+            payload = self._read_json()
+            self._send_json(self.archive.update_all(force=bool(payload.get("force"))))
+        except WikiSaverError as exc:
+            self._send_json({"ok": False, "error": str(exc)}, status=400)
+
+    def _handle_settings(self) -> None:
+        payload = self._read_json()
+        try:
+            if payload:
+                self._send_json(self.archive.update_settings(payload))
+            else:
+                self._send_json(self.archive.get_settings())
         except WikiSaverError as exc:
             self._send_json({"ok": False, "error": str(exc)}, status=400)
 

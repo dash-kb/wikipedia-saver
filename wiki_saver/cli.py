@@ -23,7 +23,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("init", help="Initialize the saved-page git repo.")
 
-    subparsers.add_parser("update-all", help="Refresh every saved page and commit any changes.")
+    update_all = subparsers.add_parser("update-all", help="Refresh every saved page and commit any changes.")
+    update_all.add_argument("--force", action="store_true", help="Refresh now even if the interval has not elapsed.")
+
+    settings = subparsers.add_parser("settings", help="Show or update refresh settings.")
+    settings.add_argument("--refresh-interval-days", type=int)
 
     server = subparsers.add_parser("serve", help="Run the local HTTP server for the browser extension.")
     server.add_argument("--host", default="127.0.0.1")
@@ -48,7 +52,12 @@ def main() -> int:
         elif args.command == "save":
             result = archive.save_url(args.url)
         elif args.command == "update-all":
-            result = archive.update_all()
+            result = archive.update_all(force=args.force)
+        elif args.command == "settings":
+            if args.refresh_interval_days is None:
+                result = archive.get_settings()
+            else:
+                result = archive.update_settings({"refresh_interval_days": args.refresh_interval_days})
         else:
             parser.error("unknown command")
             return 2

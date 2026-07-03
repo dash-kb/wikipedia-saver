@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import json
-import os
-import re
+import shutil
 import subprocess
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -15,6 +14,10 @@ from urllib.request import Request, urlopen
 
 
 USER_AGENT = "LocalWikipediaSaver/0.1 (local personal archive)"
+DEFAULT_REFRESH_INTERVAL_DAYS = 7
+MIN_REFRESH_INTERVAL_DAYS = 1
+MAX_REFRESH_INTERVAL_DAYS = 365
+SETTINGS_FILENAME = ".wiki-saver-settings.json"
 
 
 class WikiSaverError(RuntimeError):
@@ -61,6 +64,11 @@ def page_slug(title: str) -> str:
     normalized = title.replace(" ", "_")
     slug = quote(normalized, safe="")
     return slug[:180] or "untitled"
+
+
+def normalized_wikipedia_url(url: str) -> str:
+    page_ref = parse_wikipedia_url(url)
+    return page_ref.canonical_url
 
 
 def utc_now() -> str:
@@ -147,8 +155,10 @@ class GitBackedWikiArchive:
         title = fetched["title"]
         slug = page_slug(title)
 
-        page_dir = self.repo_path / "pages" / page_ref.host / slug
-        page_dir.mkdir(parents=True, exist_ok=True)
+        page_rel_path = self._page_relative_path(page_ref.host, slug)
+        page_dir = self.repo_path / page_rel_path
+        legacy_page_dir = self._legacy_page_dir(page_ref.host, slug)
+        comparison_dir = page_dir if page_dir.exists() else legacy_page_dir or page_dir
 
         metadata = {
             "title": title,
@@ -164,15 +174,34 @@ class GitBackedWikiArchive:
             "saved_at": utc_now(),
         }
 
-        self._write_text(page_dir / "article.wikitext", fetched["wikitext"])
-        self._write_text(page_dir / "article.html", fetched["html"])
-        self._write_json(page_dir / "metadata.json", metadata)
-        self._update_index(page_ref.host, slug, metadata)
+        page_changed = self._page_changed(comparison_dir, fetched["wikitext"], fetched["html"], metadata)
+        path_changed = comparison_dir != page_dir or bool(legacy_page_dir and legacy_page_dir.exists())
+        index_changed = not self._index_has_current_page(page_ref.host, slug, metadata)
+        archive_changed = page_changed or path_changed or index_changed
+
+        if page_changed:
+            page_dir.mkdir(parents=True, exist_ok=True)
+            self._write_text(page_dir / "article.wikitext", fetched["wikitext"])
+            self._write_text(page_dir / "article.html", fetched["html"])
+            self._write_json(page_dir / "metadata.json", metadata)
+        elif path_changed and legacy_page_dir and legacy_page_dir.exists() and legacy_page_dir != page_dir:
+            if page_dir.exists():
+                shutil.rmtree(legacy_page_dir)
+            else:
+                page_dir.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(legacy_page_dir), str(page_dir))
+
+        if path_changed or index_changed or page_changed:
+            self._update_index(page_ref.host, slug, metadata)
 
         commit_hash = None
-        changed = self.has_staged_or_unstaged_changes()
-        if commit and changed:
-            commit_hash = self.commit(f"Save {page_ref.host} / {title}")
+        if commit and archive_changed and self.has_staged_or_unstaged_changes():
+            message = (
+                f"Save {page_ref.host} / {title}"
+                if page_changed
+                else f"Update archive metadata for {page_ref.host} / {title}"
+            )
+            commit_hash = self.commit(message)
 
         return {
             "ok": True,
@@ -181,7 +210,8 @@ class GitBackedWikiArchive:
             "revision_id": revision.get("revid"),
             "path": str(page_dir),
             "repo": str(self.repo_path),
-            "changed": changed,
+            "changed": page_changed,
+            "archive_changed": archive_changed,
             "commit": commit_hash,
         }
 
@@ -198,8 +228,72 @@ class GitBackedWikiArchive:
             "commit": commit_hash,
         }
 
-    def update_all(self) -> dict[str, Any]:
+    def get_settings(self) -> dict[str, Any]:
         self.ensure_repo()
+        settings = self._read_settings()
+        settings["repo"] = str(self.repo_path)
+        return {"ok": True, "settings": settings}
+
+    def update_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.ensure_repo()
+        settings = self._read_settings()
+
+        if "refresh_interval_days" in payload:
+            settings["refresh_interval_days"] = self._validate_refresh_interval_days(
+                payload["refresh_interval_days"]
+            )
+
+        self._write_settings(settings)
+        return {"ok": True, "settings": settings}
+
+    def saved_status(self, url: str) -> dict[str, Any]:
+        page_ref = parse_wikipedia_url(url)
+        index_path = self.repo_path / "index.json"
+        if not index_path.exists():
+            return {"ok": True, "saved": False, "repo": str(self.repo_path)}
+
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+        requested_key = f"{page_ref.host}/{page_slug(page_ref.title)}"
+        requested_url = page_ref.canonical_url
+
+        for page in index.get("pages", []):
+            urls = [
+                page.get("canonical_url"),
+                page.get("original_url"),
+            ]
+            normalized_urls = []
+            for candidate in urls:
+                if not candidate:
+                    continue
+                try:
+                    normalized_urls.append(normalized_wikipedia_url(candidate))
+                except WikiSaverError:
+                    continue
+
+            if page.get("key") == requested_key or requested_url in normalized_urls:
+                if not self._saved_page_files_exist(page):
+                    return {"ok": True, "saved": False, "repo": str(self.repo_path)}
+                return {
+                    "ok": True,
+                    "saved": True,
+                    "repo": str(self.repo_path),
+                    "page": page,
+                }
+
+        return {"ok": True, "saved": False, "repo": str(self.repo_path)}
+
+    def update_all(self, *, force: bool = False) -> dict[str, Any]:
+        self.ensure_repo()
+        settings = self._read_settings()
+        if not force and not self._refresh_is_due(settings):
+            return {
+                "ok": True,
+                "skipped": True,
+                "reason": "not_due",
+                "settings": settings,
+                "message": f"Next refresh is not due yet. Interval is {settings['refresh_interval_days']} day(s).",
+            }
+
         index_path = self.repo_path / "index.json"
         if not index_path.exists():
             return {"ok": True, "updated": [], "count": 0, "message": "No saved pages yet."}
@@ -222,12 +316,18 @@ class GitBackedWikiArchive:
         if self.has_staged_or_unstaged_changes():
             commit_hash = self.commit("Weekly Wikipedia page refresh")
 
+        if not errors:
+            settings["last_refresh_at"] = utc_now()
+            self._write_settings(settings)
+
         return {
             "ok": not errors,
+            "skipped": False,
             "count": len(updated),
             "updated": updated,
             "errors": errors,
             "commit": commit_hash,
+            "settings": settings,
         }
 
     def ensure_repo(self) -> None:
@@ -246,6 +346,8 @@ class GitBackedWikiArchive:
         index_path = self.repo_path / "index.json"
         if not index_path.exists():
             self._write_json(index_path, {"pages": []})
+        gitignore_path = self.repo_path / ".gitignore"
+        self._ensure_gitignore_line(gitignore_path, SETTINGS_FILENAME)
 
     def has_staged_or_unstaged_changes(self) -> bool:
         status = self._git("status", "--porcelain", capture=True)
@@ -258,6 +360,61 @@ class GitBackedWikiArchive:
             return None
         self._git("commit", "-m", message)
         return self._git("rev-parse", "--short", "HEAD", capture=True).strip()
+
+    def _read_settings(self) -> dict[str, Any]:
+        settings_path = self.repo_path / SETTINGS_FILENAME
+        settings: dict[str, Any] = {}
+        if settings_path.exists():
+            try:
+                settings = json.loads(settings_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                settings = {}
+
+        settings["refresh_interval_days"] = self._validate_refresh_interval_days(
+            settings.get("refresh_interval_days", DEFAULT_REFRESH_INTERVAL_DAYS)
+        )
+        last_refresh_at = settings.get("last_refresh_at")
+        if last_refresh_at is not None:
+            settings["last_refresh_at"] = str(last_refresh_at)
+        return settings
+
+    def _write_settings(self, settings: dict[str, Any]) -> None:
+        self._write_json(self.repo_path / SETTINGS_FILENAME, settings)
+
+    @staticmethod
+    def _validate_refresh_interval_days(value: Any) -> int:
+        try:
+            days = int(value)
+        except (TypeError, ValueError) as exc:
+            raise WikiSaverError("Refresh interval must be a whole number of days.") from exc
+        if days < MIN_REFRESH_INTERVAL_DAYS or days > MAX_REFRESH_INTERVAL_DAYS:
+            raise WikiSaverError(
+                f"Refresh interval must be between {MIN_REFRESH_INTERVAL_DAYS} and {MAX_REFRESH_INTERVAL_DAYS} days."
+            )
+        return days
+
+    def _refresh_is_due(self, settings: dict[str, Any]) -> bool:
+        last_refresh_at = settings.get("last_refresh_at")
+        if not last_refresh_at:
+            return True
+
+        try:
+            last_refresh = datetime.fromisoformat(str(last_refresh_at).replace("Z", "+00:00"))
+        except ValueError:
+            return True
+
+        if last_refresh.tzinfo is None:
+            last_refresh = last_refresh.replace(tzinfo=timezone.utc)
+
+        interval = timedelta(days=self._validate_refresh_interval_days(settings.get("refresh_interval_days")))
+        return datetime.now(timezone.utc) - last_refresh >= interval
+
+    @staticmethod
+    def _ensure_gitignore_line(path: Path, line: str) -> None:
+        existing = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+        if line not in existing:
+            existing.append(line)
+            path.write_text("\n".join(existing).rstrip() + "\n", encoding="utf-8")
 
     def _update_index(self, site: str, slug: str, metadata: dict[str, Any]) -> None:
         index_path = self.repo_path / "index.json"
@@ -275,7 +432,7 @@ class GitBackedWikiArchive:
             "latest_revision_id": metadata["revision_id"],
             "latest_revision_timestamp": metadata["revision_timestamp"],
             "last_saved_at": metadata["saved_at"],
-            "path": f"pages/{site}/{slug}",
+            "path": str(self._page_relative_path(site, slug)),
         }
 
         for idx, page in enumerate(pages):
@@ -287,6 +444,90 @@ class GitBackedWikiArchive:
 
         pages.sort(key=lambda page: (page.get("site", ""), page.get("title", "").lower()))
         self._write_json(index_path, index)
+
+    def _index_has_current_page(self, site: str, slug: str, metadata: dict[str, Any]) -> bool:
+        index_path = self.repo_path / "index.json"
+        if not index_path.exists():
+            return False
+
+        try:
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return False
+
+        key = f"{site}/{slug}"
+        expected_path = str(self._page_relative_path(site, slug))
+        for page in index.get("pages", []):
+            if page.get("key") != key:
+                continue
+            return (
+                page.get("path") == expected_path
+                and page.get("latest_revision_id") == metadata["revision_id"]
+                and page.get("canonical_url") == metadata["canonical_url"]
+            )
+        return False
+
+    def _saved_page_files_exist(self, page: dict[str, Any]) -> bool:
+        page_path = page.get("path")
+        if page_path:
+            page_dir = self.repo_path / page_path
+            if self._required_page_files_exist(page_dir):
+                return True
+
+        site = page.get("site")
+        slug = page.get("slug")
+        if site and slug:
+            if self._required_page_files_exist(self.repo_path / self._page_relative_path(site, slug)):
+                return True
+            legacy_page_dir = self._legacy_page_dir(site, slug)
+            if legacy_page_dir and self._required_page_files_exist(legacy_page_dir):
+                return True
+
+        return False
+
+    @staticmethod
+    def _required_page_files_exist(page_dir: Path) -> bool:
+        return (
+            (page_dir / "article.wikitext").is_file()
+            and (page_dir / "article.html").is_file()
+            and (page_dir / "metadata.json").is_file()
+        )
+
+    @staticmethod
+    def _page_relative_path(site: str, slug: str) -> Path:
+        if site == "en.wikipedia.org":
+            return Path("pages") / slug
+        return Path("pages") / site / slug
+
+    def _legacy_page_dir(self, site: str, slug: str) -> Path | None:
+        if site != "en.wikipedia.org":
+            return None
+        legacy = self.repo_path / "pages" / site / slug
+        return legacy if legacy.exists() else None
+
+    def _page_changed(self, page_dir: Path, wikitext: str, html: str, metadata: dict[str, Any]) -> bool:
+        wikitext_path = page_dir / "article.wikitext"
+        html_path = page_dir / "article.html"
+        metadata_path = page_dir / "metadata.json"
+        if not wikitext_path.exists() or not html_path.exists() or not metadata_path.exists():
+            return True
+
+        if wikitext_path.read_text(encoding="utf-8").rstrip() != wikitext.rstrip():
+            return True
+        if html_path.read_text(encoding="utf-8").rstrip() != html.rstrip():
+            return True
+
+        try:
+            existing_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return True
+
+        return self._stable_metadata(existing_metadata) != self._stable_metadata(metadata)
+
+    @staticmethod
+    def _stable_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+        ignored = {"saved_at", "original_url"}
+        return {key: value for key, value in metadata.items() if key not in ignored}
 
     def _ensure_git_identity(self) -> None:
         if not self._git_config_exists("user.name"):

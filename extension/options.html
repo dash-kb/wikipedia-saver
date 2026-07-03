@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Wikipedia Saver Options</title>
+    <link rel="stylesheet" href="options.css">
+  </head>
+  <body>
+    <main>
+      <h1>Wikipedia Saver</h1>
+      <form id="settings-form">
+        <label for="refresh-interval-days">Refresh saved pages every</label>
+        <div class="field-row">
+          <input id="refresh-interval-days" name="refresh_interval_days" type="number" min="1" max="365" step="1" required>
+          <span>days</span>
+        </div>
+        <button type="submit">Save</button>
+      </form>
+      <p id="status" role="status"></p>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>
