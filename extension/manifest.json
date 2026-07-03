@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Local Wikipedia Saver",
+  "version": "0.1.0",
+  "description": "Save Wikipedia articles into a local git-backed archive.",
+  "permissions": [],
+  "host_permissions": [
+    "https://*.wikipedia.org/*",
+    "http://127.0.0.1:8765/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.wikipedia.org/wiki/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

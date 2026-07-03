@@ -1,0 +1,40 @@
+#local-wikipedia-saver-button {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2147483647;
+  min-width: 144px;
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 1px solid #54595d;
+  border-radius: 4px;
+  background: #fff;
+  color: #202122;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  font: 14px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  cursor: pointer;
+}
+
+#local-wikipedia-saver-button:hover {
+  background: #f8f9fa;
+  border-color: #36c;
+}
+
+#local-wikipedia-saver-button:disabled {
+  cursor: wait;
+  opacity: 0.8;
+}
+
+#local-wikipedia-saver-button[data-state="saving"] {
+  border-color: #36c;
+}
+
+#local-wikipedia-saver-button[data-state="saved"] {
+  background: #eaf3ff;
+  border-color: #36c;
+}
+
+#local-wikipedia-saver-button[data-state="error"] {
+  background: #fee7e6;
+  border-color: #d33;
+}
